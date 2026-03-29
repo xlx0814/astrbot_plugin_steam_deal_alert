@@ -21,13 +21,13 @@
 ### 订阅游戏
 
 ```bash
-/steam订阅 游戏名 [折扣阈值]
+/steam订阅 游戏名(有英文名的话优先使用) [折扣阈值]
 ```
 
 示例：
 
 ```bash
-/steam订阅 黑神话 悟空 20
+/steam订阅 Resident Evil Requiem 20
 /steam订阅 幻兽帕鲁 25
 ```
 
