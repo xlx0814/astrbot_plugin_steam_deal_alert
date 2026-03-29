@@ -1,12 +1,12 @@
 # Steam 特惠提醒插件
 
-> 一款Steam 优惠查询 + 降价提醒插件。
+> AstrBot 专用的 Steam 优惠查询 + 降价提醒插件。
 
 ## ✨ 功能亮点
 
 - 🔎 查询当前 Steam 特惠（最多 30 条）
 - 🔔 按游戏单独订阅折扣提醒
-- 📬 达到阈值后自动推送到当前会话（Telegram / 微信/等等）
+- 📬 达到阈值后自动推送到当前会话（Telegram / 微信）
 
 ---
 
@@ -21,13 +21,13 @@
 ### 订阅游戏
 
 ```bash
-/steam订阅 游戏名(有英文名的话优先使用) [折扣阈值]
+/steam订阅 游戏名 [折扣阈值]
 ```
 
 示例：
 
 ```bash
-/steam订阅 Resident Evil Requiem 20
+/steam订阅 黑神话 悟空 20
 /steam订阅 幻兽帕鲁 25
 ```
 
@@ -48,7 +48,7 @@
 示例：
 
 ```bash
-/steam取消 Resident Evil Requiem
+/steam取消 黑神话
 /steam取消 1623730
 ```
 
@@ -60,8 +60,8 @@
 
 ```text
 steam特惠
-订阅steam Resident Evil Requiem 20
-取消steam Resident Evil Requiem
+订阅steam 黑神话 悟空 20
+取消steam 黑神话
 我的steam
 ```
 

@@ -22,7 +22,7 @@ class SteamDealAlertPlugin(Star):
         self.cc = str(config.get("cc", "cn"))
         self.lang = str(config.get("lang", "schinese"))
         self.poll_seconds = int(config.get("poll_seconds", 300))
-        self.top_deals_limit = int(config.get("top_deals_limit", 10))
+        self.top_deals_limit = int(config.get("top_deals_limit", 30))
 
         self.data_dir = Path(StarTools.get_data_dir("astrbot_plugin_steam_deal_alert"))
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -366,35 +366,50 @@ class SteamDealAlertPlugin(Star):
             )
         yield event.plain_result("\n".join(lines))
 
+    def _resolve_umo(self, slot: dict[str, Any]) -> str:
+        umo = str(slot.get("umo", "") or "")
+        if umo:
+            return umo
+        platform = str(slot.get("platform", "Unknown") or "Unknown").capitalize()
+        session_id = str(slot.get("session_id", "") or "")
+        if not session_id:
+            return ""
+        return f"{platform}/{session_id}"
+
+    @staticmethod
+    def _display_name(info: dict[str, Any], item: dict[str, Any]) -> str:
+        name = str(info.get("name") or "").strip()
+        if (not name or name.startswith("App ")) and item.get("name"):
+            name = str(item.get("name"))
+        return name or f"App {int(item.get('app_id', 0) or 0)}"
+
+    def _build_discount_message(self, info: dict[str, Any], item: dict[str, Any], threshold: int, discount: int) -> str:
+        display_name = self._display_name(info, item)
+        return (
+            "┏━ 🎯 Steam 降价提醒 ━\n"
+            f"┃{display_name}｜-{discount}%（阈值 -{threshold}%）｜现价 {info['final_price']}｜原价 {info['initial_price']}\n"
+            "┗━"
+        )
+
     async def _check_user_subscription_now(self, slot: dict[str, Any], item: dict[str, Any]):
         app_id = int(item.get("app_id", 0) or 0)
         if app_id <= 0:
             return
+
         info = await self._app_price(app_id)
         if not info:
             return
+
         discount = int(info.get("discount", 0) or 0)
         threshold = int(item.get("threshold", 1) or 1)
         if discount < threshold:
             return
 
-        umo = str(slot.get("umo", "") or "")
+        umo = self._resolve_umo(slot)
         if not umo:
-            platform = str(slot.get("platform", "Unknown") or "Unknown").capitalize()
-            session_id = str(slot.get("session_id", "") or "")
-            if not session_id:
-                return
-            umo = f"{platform}/{session_id}"
+            return
 
-        display_name = str(info.get('name') or '').strip()
-        if (not display_name or display_name.startswith('App ')) and item.get('name'):
-            display_name = str(item.get('name'))
-
-        msg = (
-            "┏━ 🎯 Steam 降价提醒 ━\n"
-            f"┃{display_name}｜-{discount}%（阈值 -{threshold}%）｜现价 {info['final_price']}｜原价 {info['initial_price']}\n"
-            "┗━"
-        )
+        msg = self._build_discount_message(info, item, threshold, discount)
         await self.context.send_message(umo, MessageChain([Plain(msg)]))
         item["last_notified_discount"] = discount
         self._save_db()
@@ -447,26 +462,47 @@ class SteamDealAlertPlugin(Star):
         if not isinstance(users, dict) or not users:
             return
 
+        # 去重 appid，避免 N+1 重复请求
+        all_app_ids: set[int] = set()
+        for slot in users.values():
+            watch = slot.get("watch", []) if isinstance(slot, dict) else []
+            for item in watch:
+                app_id = int(item.get("app_id", 0) or 0)
+                if app_id > 0:
+                    all_app_ids.add(app_id)
+
+        if not all_app_ids:
+            return
+
+        sem = asyncio.Semaphore(5)
+        app_info_map: dict[int, dict[str, Any] | None] = {}
+
+        async def fetch_one(app_id: int):
+            async with sem:
+                try:
+                    app_info_map[app_id] = await self._app_price(app_id)
+                except Exception as e:
+                    logger.error(f"[SteamDeal] 获取价格失败 app={app_id}: {e}")
+                    app_info_map[app_id] = None
+                await asyncio.sleep(0.05)
+
+        await asyncio.gather(*(fetch_one(aid) for aid in all_app_ids))
+
         for user_id, slot in users.items():
             watch = slot.get("watch", []) if isinstance(slot, dict) else []
             if not watch:
                 continue
-            platform = str(slot.get("platform", ""))
-            session_id = str(slot.get("session_id", ""))
-            umo = str(slot.get("umo", "") or "")
+
+            umo = self._resolve_umo(slot)
             if not umo:
-                # 向后兼容旧数据
-                if session_id:
-                    p = (platform or "Unknown").capitalize()
-                    umo = f"{p}/{session_id}"
-                else:
-                    continue
+                continue
 
             for item in watch:
                 app_id = int(item.get("app_id", 0) or 0)
                 if app_id <= 0:
                     continue
-                info = await self._app_price(app_id)
+
+                info = app_info_map.get(app_id)
                 if not info:
                     continue
 
@@ -475,19 +511,10 @@ class SteamDealAlertPlugin(Star):
                 last_notified = int(item.get("last_notified_discount", 0) or 0)
 
                 if discount >= threshold and discount > last_notified:
-                    display_name = str(info.get('name') or '').strip()
-                    if (not display_name or display_name.startswith('App ')) and item.get('name'):
-                        display_name = str(item.get('name'))
-
-                    msg = (
-                        "┏━ 🎯 Steam 降价提醒 ━\n"
-                        f"┃{display_name}｜-{discount}%（阈值 -{threshold}%）｜现价 {info['final_price']}｜原价 {info['initial_price']}\n"
-                        "┗━"
-                    )
+                    msg = self._build_discount_message(info, item, threshold, discount)
                     try:
                         await self.context.send_message(umo, MessageChain([Plain(msg)]))
                         item["last_notified_discount"] = discount
-                        self._save_db()
                     except Exception as e:
                         logger.error(f"[SteamDeal] 发送提醒失败 user={user_id} app={app_id}: {e}")
 
