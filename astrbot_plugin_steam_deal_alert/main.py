@@ -73,14 +73,33 @@ class SteamDealAlertPlugin(Star):
         umo = str(getattr(event, "unified_msg_origin", "") or "")
         return str(platform), str(session_id), umo
 
-    async def _steam_store_search(self, keyword: str) -> list[dict]:
+    async def _http_get_json(self, url: str, params: dict[str, Any]) -> dict[str, Any] | None:
         session = await self._get_http()
+        last_err: Exception | None = None
+        for attempt in range(3):
+            try:
+                async with session.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"}) as resp:
+                    if resp.status == 200:
+                        data = await resp.json(content_type=None)
+                        return data if isinstance(data, dict) else None
+                    if resp.status in {429, 500, 502, 503, 504}:
+                        await asyncio.sleep(0.6 * (2 ** attempt))
+                        continue
+                    return None
+            except Exception as e:
+                last_err = e
+                await asyncio.sleep(0.6 * (2 ** attempt))
+        if last_err:
+            logger.error(f"[SteamDeal] HTTP请求失败: {url} {last_err}")
+        return None
+
+    async def _steam_store_search(self, keyword: str) -> list[dict]:
         url = "https://store.steampowered.com/api/storesearch"
         params = {"term": keyword, "l": self.lang, "cc": self.cc}
-        async with session.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"}) as resp:
-            if resp.status != 200:
-                raise RuntimeError(f"storesearch HTTP {resp.status}")
-            data = await resp.json(content_type=None)
+        data = await self._http_get_json(url, params)
+        if not data:
+            return []
+
         items = data.get("items", []) if isinstance(data, dict) else []
         out = []
         for it in items[:10]:
@@ -97,13 +116,11 @@ class SteamDealAlertPlugin(Star):
         return re.sub(r"\s+", "", (s or "").strip().lower())
 
     async def _app_price(self, app_id: int) -> dict[str, Any] | None:
-        session = await self._get_http()
         url = "https://store.steampowered.com/api/appdetails"
         params = {"appids": str(app_id), "cc": self.cc, "l": self.lang, "filters": "price_overview,name"}
-        async with session.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"}) as resp:
-            if resp.status != 200:
-                return None
-            data = await resp.json(content_type=None)
+        data = await self._http_get_json(url, params)
+        if not data:
+            return None
 
         node = data.get(str(app_id), {}) if isinstance(data, dict) else {}
         if not node or not node.get("success"):
@@ -125,62 +142,38 @@ class SteamDealAlertPlugin(Star):
         }
 
     async def _featured_deals(self) -> list[dict[str, Any]]:
-        # 用 Steam 官方搜索接口拉取更多特惠（支持最多 30 条）
-        session = await self._get_http()
-        url = "https://store.steampowered.com/search/results/"
-        params = {
-            "query": "",
-            "start": 0,
-            "count": max(50, self.top_deals_limit),
-            "dynamic_data": "",
-            "sort_by": "Discount_DESC",
-            "specials": 1,
-            "snr": "1_7_7_230_7",
-            "infinite": 1,
-            "cc": self.cc,
-            "l": self.lang,
-        }
-        async with session.get(url, params=params, headers={"User-Agent": "Mozilla/5.0"}) as resp:
-            if resp.status != 200:
-                raise RuntimeError(f"search/results HTTP {resp.status}")
-            data = await resp.json(content_type=None)
-
-        html = str((data or {}).get("results_html") or "")
-        if not html:
+        # 使用官方 featuredcategories，合并多个分组以扩展到 30 条，避免 HTML 正则解析
+        url = "https://store.steampowered.com/api/featuredcategories"
+        params = {"cc": self.cc, "l": self.lang}
+        data = await self._http_get_json(url, params)
+        if not data:
             return []
 
+        groups = ["specials", "top_sellers", "new_releases"]
         rows: list[dict[str, Any]] = []
         seen: set[int] = set()
-        for m in re.finditer(r'<a[^>]*data-ds-appid="(\d+)"[^>]*>(.*?)</a>', html, flags=re.S):
-            app_id = int(m.group(1))
-            if app_id <= 0 or app_id in seen:
-                continue
-            block = m.group(2)
 
-            name_m = re.search(r'<span class="title">(.*?)</span>', block, flags=re.S)
-            dis_m = re.search(r'<div class="discount_pct">-?(\d+)%</div>', block, flags=re.S)
-            final_m = re.search(r'<div class="discount_final_price">\s*(.*?)\s*</div>', block, flags=re.S)
-            orig_m = re.search(r'<div class="discount_original_price">\s*(.*?)\s*</div>', block, flags=re.S)
+        for g in groups:
+            items = ((data.get(g) or {}).get("items") or []) if isinstance(data, dict) else []
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                app_id = int(it.get("id", 0) or 0)
+                if app_id <= 0 or app_id in seen:
+                    continue
 
-            if not (name_m and dis_m and final_m and orig_m):
-                continue
+                discount = int(it.get("discount_percent", 0) or 0)
+                if discount <= 0:
+                    continue
 
-            name = re.sub(r"<.*?>", "", name_m.group(1)).strip()
-            final_price = re.sub(r"<.*?>", "", final_m.group(1)).strip()
-            original_price = re.sub(r"<.*?>", "", orig_m.group(1)).strip()
-            discount = int(dis_m.group(1))
-
-            rows.append({
-                "app_id": app_id,
-                "name": name or f"App {app_id}",
-                "discount": discount,
-                "final_price": final_price,
-                "original_price": original_price,
-            })
-            seen.add(app_id)
-
-            if len(rows) >= self.top_deals_limit:
-                break
+                rows.append({
+                    "app_id": app_id,
+                    "name": str(it.get("name") or f"App {app_id}"),
+                    "discount": discount,
+                    "final_price": str(it.get("final_formatted") or it.get("final_price_formatted") or "未知"),
+                    "original_price": str(it.get("original_price_formatted") or it.get("initial_formatted") or "未知"),
+                })
+                seen.add(app_id)
 
         rows.sort(key=lambda x: x["discount"], reverse=True)
         return rows[: self.top_deals_limit]
