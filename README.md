@@ -1,0 +1,2 @@
+# astrbot_plugin_steam_deal_alert
+一个AstrBot专用的 Steam优惠查询提醒插件
