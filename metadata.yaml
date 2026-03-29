@@ -1,0 +1,7 @@
+{
+  "name": "astrbot_plugin_steam_deal_alert",
+  "display_name": "steam优惠查询提醒",
+  "desc": "一款steam游戏优惠信息查询与订阅消息提醒插件",
+  "author": "zhoujiwang",
+  "repo":"https://github.com/xlx0814/astrbot_plugin_steam_deal_alert"
+}
