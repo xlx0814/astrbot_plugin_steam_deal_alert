@@ -92,6 +92,10 @@ class SteamDealAlertPlugin(Star):
             })
         return [x for x in out if x["id"] > 0 and x["name"]]
 
+    @staticmethod
+    def _norm_text(s: str) -> str:
+        return re.sub(r"\s+", "", (s or "").strip().lower())
+
     async def _app_price(self, app_id: int) -> dict[str, Any] | None:
         session = await self._get_http()
         url = "https://store.steampowered.com/api/appdetails"
@@ -252,12 +256,45 @@ class SteamDealAlertPlugin(Star):
         threshold = max(1, min(int(threshold), 95))
 
         try:
-            result = await self._steam_store_search(keyword)
-            if not result:
-                yield event.plain_result(f"没搜到《{keyword}》，换个关键词试试。")
+            # 支持直接按 appid 订阅（最准确）
+            appid_kw = keyword.lower().replace("appid:", "").strip()
+            app: dict[str, Any] | None = None
+            if appid_kw.isdigit():
+                info = await self._app_price(int(appid_kw))
+                if info:
+                    app = {"id": int(info["app_id"]), "name": str(info["name"])}
+                else:
+                    yield event.plain_result(f"appid {appid_kw} 无效或当前地区不可用。")
+                    return
+            else:
+                result = await self._steam_store_search(keyword)
+                if not result:
+                    yield event.plain_result(f"没搜到《{keyword}》，换个关键词试试。")
+                    return
+
+                k = self._norm_text(keyword)
+                exact = [x for x in result if self._norm_text(str(x.get("name", ""))) == k]
+                if len(exact) == 1:
+                    app = exact[0]
+                else:
+                    contains = [x for x in result if k and k in self._norm_text(str(x.get("name", "")))]
+                    if len(contains) == 1:
+                        app = contains[0]
+                    elif len(exact) > 1 or len(contains) > 1 or len(result) > 1:
+                        cands = exact if len(exact) > 1 else (contains if len(contains) > 1 else result)
+                        lines = ["匹配到多个游戏，请用 appid 精确订阅："]
+                        for i, c in enumerate(cands[:5], 1):
+                            lines.append(f"{i}. {c['name']}（appid:{c['id']}）")
+                        lines.append("示例：/steam订阅 appid:381210 20")
+                        yield event.plain_result("\n".join(lines))
+                        return
+                    else:
+                        app = result[0]
+
+            if not app:
+                yield event.plain_result("订阅失败：无法确定唯一游戏，请改用 appid。")
                 return
 
-            app = result[0]
             user_id, slot = self._ensure_user_slot(event)
             watch = slot["watch"]
 
