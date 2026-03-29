@@ -1,0 +1,6 @@
+name: astrbot_plugin_steam_deal_alert
+display_name: Steam 特惠提醒
+desc: 查询 Steam 特惠，支持按游戏订阅折扣提醒（Telegram/微信会话可主动推送）。
+version: v0.1.0
+author: naizhouwang
+repo: local

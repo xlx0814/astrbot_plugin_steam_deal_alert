@@ -1,0 +1,26 @@
+{
+  "cc": {
+    "description": "国家/地区代码",
+    "type": "string",
+    "hint": "Steam 价格区域，例如 cn/us/hk",
+    "default": "cn"
+  },
+  "lang": {
+    "description": "语言",
+    "type": "string",
+    "hint": "Steam 语言，例如 schinese/english",
+    "default": "schinese"
+  },
+  "poll_seconds": {
+    "description": "轮询间隔(秒)",
+    "type": "int",
+    "hint": "后台检查订阅游戏折扣变化的间隔，建议 >= 180",
+    "default": 300
+  },
+  "top_deals_limit": {
+    "description": "特惠列表条数",
+    "type": "int",
+    "hint": "steam特惠 命令返回条数",
+    "default": 10
+  }
+}
