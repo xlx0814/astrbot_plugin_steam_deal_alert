@@ -48,7 +48,7 @@
 示例：
 
 ```bash
-/steam取消 黑神话
+/steam取消 Resident Evil Requiem
 /steam取消 1623730
 ```
 
@@ -60,8 +60,8 @@
 
 ```text
 steam特惠
-订阅steam 黑神话 悟空 20
-取消steam 黑神话
+订阅steam Resident Evil Requiem 20
+取消steam Resident Evil Requiem
 我的steam
 ```
 
