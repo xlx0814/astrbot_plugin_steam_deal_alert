@@ -2,7 +2,6 @@ import asyncio
 import json
 import re
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -51,7 +50,8 @@ class SteamDealAlertPlugin(Star):
                 with open(self.db_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 if isinstance(data, dict):
-                    data.setdefault("users", {})
+                    users = data.get("users")
+                    data["users"] = users if isinstance(users, dict) else {}
                     return data
             except Exception as e:
                 logger.error(f"[SteamDeal] 读取订阅库失败: {e}")
@@ -288,7 +288,7 @@ class SteamDealAlertPlugin(Star):
                 yield event.plain_result("订阅失败：无法确定唯一游戏，请改用 appid。")
                 return
 
-            user_id, slot = self._ensure_user_slot(event)
+            _, slot = self._ensure_user_slot(event)
             watch = slot["watch"]
 
             for item in watch:
@@ -325,7 +325,7 @@ class SteamDealAlertPlugin(Star):
             yield event.plain_result("用法：/steam取消 游戏名或appid")
             return
 
-        user_id, slot = self._ensure_user_slot(event)
+        _, slot = self._ensure_user_slot(event)
         before = len(slot["watch"])
 
         appid = int(arg) if arg.isdigit() else None
@@ -346,7 +346,7 @@ class SteamDealAlertPlugin(Star):
 
     @filter.command("steam我的")
     async def cmd_my_subscriptions(self, event: AstrMessageEvent):
-        user_id, slot = self._ensure_user_slot(event)
+        _, slot = self._ensure_user_slot(event)
         watch = slot.get("watch", [])
         if not watch:
             yield event.plain_result("你还没订阅任何游戏。\n先用：/steam订阅 游戏名 [折扣阈值]")
